@@ -23,6 +23,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/overpass/, '/api'),
       },
+      '/api/google-places': {
+        target: 'https://places.googleapis.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/google-places/, ''),
+      },
+      '/api/google': {
+        target: 'https://maps.googleapis.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/google/, ''),
+      },
     },
   },
 })

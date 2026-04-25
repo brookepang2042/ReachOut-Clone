@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 import {
   geocodeAddress,
   searchProviders,
   getPlaceDetails,
+  suggestAddresses,
   distanceMiles,
+  type AddressSuggestion,
   type Place,
   type PlaceDetails,
   type ProviderType,
@@ -126,11 +128,39 @@ function applyResourceFilter(clinics: Clinic[], filters: ResourceFilters): Clini
   })
 }
 
+function dedupeClinics(clinics: Clinic[]): Clinic[] {
+  const seen = new Set<string>()
+  return clinics.filter((clinic) => {
+    const key = getClinicDedupeKey(clinic)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function getClinicDedupeKey(clinic: Clinic): string {
+  const compactName = normalizeText(clinic.name)
+    .replace(/\b(the|inc|llc|pc|center|centre|clinic|services|service|health|mental|behavioral|behavioural)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const address = normalizeText(clinic.address)
+  return `${compactName || normalizeText(clinic.name)}-${address || `${clinic.lat.toFixed(3)}-${clinic.lng.toFixed(3)}`}`
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 /** Convert Google Place + Details into our Clinic shape. */
 function toClinic(place: Place, details: PlaceDetails | null, originLat: number, originLng: number): Clinic {
   const { label, services } = inferServices(place.name, place.types)
   const lat = place.lat ?? 0
   const lng = place.lng ?? 0
+  const fallbackWebsite = place.types.find((type) => type.startsWith('website:'))?.replace('website:', '') ?? null
   return {
     id: place.id,
     name: place.name,
@@ -138,13 +168,13 @@ function toClinic(place: Place, details: PlaceDetails | null, originLat: number,
     lat,
     lng,
     distanceMiles: distanceMiles(originLat, originLng, lat, lng),
-    phone: details?.phone ?? null,
-    website: details?.website ?? null,
+    phone: details?.phone ?? place.fallbackPhone ?? null,
+    website: details?.website ?? fallbackWebsite,
     googleUrl: details?.googleUrl ?? null,
     rating: place.rating,
     reviewCount: place.reviewCount,
-    isOpenNow: details?.isOpenNow ?? place.openNow,
-    hours: details?.hours ?? null,
+    isOpenNow: details?.isOpenNow ?? place.openNow ?? place.fallbackOpenNow ?? null,
+    hours: details?.hours ?? place.fallbackHours ?? null,
     serviceLabel: label,
     services,
   }
@@ -248,7 +278,10 @@ function ClinicCard({ clinic }: { clinic: Clinic }) {
 function App() {
   const resultsPerPage = 10
   const [location, setLocation] = useState('')
-  const [distance, setDistance] = useState(5)
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([])
+  const [isSuggesting, setIsSuggesting] = useState(false)
+  const [selectedAddress, setSelectedAddress] = useState<AddressSuggestion | null>(null)
+  const [distanceInput, setDistanceInput] = useState('5')
   const [status, setStatus] = useState('Search a city, ZIP, or address to find nearby support options')
   const [filtersOpen, setFiltersOpen] = useState(true)
   const [clinics, setClinics] = useState<Clinic[]>([initialPlaceholder])
@@ -261,21 +294,60 @@ function App() {
     telehealth: false,
   })
 
+  useEffect(() => {
+    const trimmedLocation = location.trim()
+    if (trimmedLocation.length < 3 || selectedAddress?.formatted === trimmedLocation) {
+      setAddressSuggestions([])
+      return
+    }
+
+    let isCurrent = true
+    const timer = window.setTimeout(async () => {
+      setIsSuggesting(true)
+      try {
+        const suggestions = await suggestAddresses(trimmedLocation)
+        if (isCurrent) {
+          setAddressSuggestions(suggestions)
+        }
+      } catch {
+        if (isCurrent) {
+          setAddressSuggestions([])
+        }
+      } finally {
+        if (isCurrent) {
+          setIsSuggesting(false)
+        }
+      }
+    }, 350)
+
+    return () => {
+      isCurrent = false
+      window.clearTimeout(timer)
+    }
+  }, [location, selectedAddress])
+
   async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const place = location.trim()
+    const distance = getValidDistance()
     if (!place) {
       setError('Enter a city, ZIP, or address first.')
       return
     }
 
+    if (distance === null) {
+      setError('Distance must be at least 1 mile.')
+      return
+    }
+
     setError('')
+    setDistanceInput(String(distance))
     setIsSearching(true)
     setStatus(`Searching within ${distance} miles of ${place}...`)
 
     try {
-      // 1. Geocode the user's input.
-      const geo = await geocodeAddress(place)
+      // 1. Geocode the user's input, or reuse the confirmed address selection.
+      const geo = selectedAddress?.formatted === place ? selectedAddress : await geocodeAddress(place)
 
       // 2. Search Google Places using filter-derived query.
       const providerType = filtersToProviderType(filters)
@@ -297,7 +369,7 @@ function App() {
         .sort((a, b) => a.distanceMiles - b.distanceMiles)
 
       // 5. Apply local resource filtering (telehealth needs name-based filter).
-      results = applyResourceFilter(results, filters)
+      results = dedupeClinics(applyResourceFilter(results, filters))
 
       setClinics(results)
       setCurrentPage(1)
@@ -318,6 +390,30 @@ function App() {
 
   function toggleFilter(key: keyof ResourceFilters) {
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function handleLocationChange(value: string) {
+    setLocation(value)
+    setSelectedAddress(null)
+  }
+
+  function chooseAddress(suggestion: AddressSuggestion) {
+    setSelectedAddress(suggestion)
+    setLocation(suggestion.formatted)
+    setAddressSuggestions([])
+    setError('')
+  }
+
+  function getValidDistance() {
+    const parsedDistance = Number(distanceInput)
+    if (!Number.isFinite(parsedDistance) || parsedDistance < 1) return null
+    return Math.min(parsedDistance, 50)
+  }
+
+  function handleDistanceBlur() {
+    const distance = getValidDistance()
+    setDistanceInput(distance === null ? '1' : String(distance))
+    setCurrentPage(1)
   }
 
   function goToPage(page: number) {
@@ -360,14 +456,35 @@ function App() {
         <section className="search-panel" aria-label="Find nearby care">
           <form className="search-form" onSubmit={handleSearch}>
             <label className="sr-only" htmlFor="locationInput">Enter city, ZIP, or address</label>
-            <input
-              id="locationInput"
-              type="search"
-              placeholder="Enter city, ZIP, or address"
-              autoComplete="off"
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-            />
+            <div className="search-field">
+              <input
+                id="locationInput"
+                type="search"
+                placeholder="Enter city, ZIP, exact address, or building"
+                autoComplete="off"
+                value={location}
+                onChange={(event) => handleLocationChange(event.target.value)}
+                onFocus={() => {
+                  if (addressSuggestions.length) setAddressSuggestions(addressSuggestions)
+                }}
+              />
+
+              {(addressSuggestions.length > 0 || isSuggesting) && (
+                <div className="address-suggestions" role="listbox" aria-label="Confirmed USA address suggestions">
+                  {isSuggesting && <p className="suggestion-status">Checking addresses...</p>}
+                  {addressSuggestions.map((suggestion) => (
+                    <button
+                      type="button"
+                      key={suggestion.id}
+                      onClick={() => chooseAddress(suggestion)}
+                      role="option"
+                    >
+                      {suggestion.formatted}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button type="submit" disabled={isSearching}>
               {isSearching ? 'Searching...' : 'Search'}
             </button>
@@ -396,12 +513,12 @@ function App() {
                         type="number"
                         min="1"
                         max="50"
-                        value={distance}
+                        value={distanceInput}
                         onChange={(event) => {
-                          const nextDistance = Math.max(1, Number(event.target.value) || 1)
-                          setDistance(nextDistance)
+                          setDistanceInput(event.target.value)
                           setCurrentPage(1)
                         }}
+                        onBlur={handleDistanceBlur}
                       />
                       <span>miles</span>
                     </label>
@@ -486,7 +603,8 @@ function App() {
               )}
 
               <p className="attribution">
-                Provider data from Google Places. Call providers to confirm services, hours, insurance, and availability.
+                Provider data from Google Places when available, with OpenStreetMap backup results. Call providers to
+                confirm services, hours, insurance, and availability.
               </p>
             </section>
           </div>
