@@ -428,9 +428,9 @@ function App() {
   return (
     <div className="page-shell">
       <header className="site-header" aria-label="Main navigation">
-        <a className="brand" href="#" aria-label="Reach Out home">
+        <a className="brand" href="#" aria-label="ReachOut home">
           <span className="brand-mark" aria-hidden="true">RO</span>
-          <span>Reach Out</span>
+          <span>ReachOut</span>
         </a>
         <a className="lifeline-link" href="tel:988" aria-label="Call the 988 Lifeline">
           988 Lifeline
