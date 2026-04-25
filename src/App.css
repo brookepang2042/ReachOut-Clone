@@ -574,4 +574,68 @@ dd {
     border-left: 0;
     border-top: 1px solid var(--line);
   }
+
 }
+
+
+.rating-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.rating-stars {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.rating-value {
+  color: #111827;
+}
+
+.rating-count {
+  color: #6b7280;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.directions-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f766e;
+  background: #ccfbf1;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.directions-link:hover,
+.directions-link:focus {
+  background: #99f6e4;
+}
+
+.error-line {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.9rem;
+  background: #fef2f2;
+  border-left: 4px solid #b91c1c;
+  color: #991b1b;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.open-now.is-unknown {
+  color: #6b7280;
+}
+
+.open-now.is-unknown .pulse {
+  background: #9ca3af;
+}
+
