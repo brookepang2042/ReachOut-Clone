@@ -35,7 +35,7 @@ ReachOut is a web app that makes it easy to find nearby mental health resources.
 Clone the repo and install dependencies:
 
 ```bash
-git clone https://github.com/kathyzguo/ReachOut.git
+git clone https://github.com/brookepang2042/ReachOut-Clone.git 
 cd ReachOut
 npm install
 ```
